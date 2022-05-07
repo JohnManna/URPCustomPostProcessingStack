@@ -49,7 +49,7 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         /// <summary>
         /// A handle to the "_AfterPostProcessTexture" used as the target for the builtin post processing pass in the last camera in the camera stack 
         /// </summary>
-        private RenderTargetHandle m_AfterPostProcessColor;
+        private RenderTargetHandle m_AfterPostProcessColor, m_BeforePostProcessColor;
 
         /// <summary>
         /// Injects the custom post-processing render passes.
@@ -58,15 +58,25 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         /// <param name="renderingData">Rendering state. Use this to setup render passes.</param>
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            UniversalRenderer u_renderer = renderer as UniversalRenderer;
+            if(u_renderer == null) {
+                Debug.LogWarning("The CustomPostProcess renderer feature supports the UniversalRenderer only");
+                return;
+            }
+            
             // Only inject passes if post processing is enabled
             if(renderingData.cameraData.postProcessEnabled) {
                 // For each pass, only inject if there is at least one custom post-processing renderer class in it.
                 if(m_AfterOpaqueAndSky.HasPostProcessRenderers && m_AfterOpaqueAndSky.PrepareRenderers(ref renderingData)){
-                    m_AfterOpaqueAndSky.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
+                    //m_AfterOpaqueAndSky.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
+                    //For URP 12
+                    m_AfterOpaqueAndSky.Setup(m_BeforePostProcessColor.Identifier(), m_BeforePostProcessColor.Identifier());
                     renderer.EnqueuePass(m_AfterOpaqueAndSky);
                 }
                 if(m_BeforePostProcess.HasPostProcessRenderers && m_BeforePostProcess.PrepareRenderers(ref renderingData)){
-                    m_BeforePostProcess.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
+                    //m_BeforePostProcess.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
+                    //For URP 12
+                    m_BeforePostProcess.Setup(m_BeforePostProcessColor.Identifier(), m_BeforePostProcessColor.Identifier());
                     renderer.EnqueuePass(m_BeforePostProcess);
                 }
                 if(m_AfterPostProcess.HasPostProcessRenderers && m_AfterPostProcess.PrepareRenderers(ref renderingData)){
@@ -84,7 +94,10 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         public override void Create()
         {
             // This is copied from the forward renderer
-            m_AfterPostProcessColor.Init("_AfterPostProcessTexture");
+            //m_AfterPostProcessColor.Init("_AfterPostProcessTexture");
+            //For URP 12
+            m_AfterPostProcessColor.Init("_CameraColorAttachmentB");
+            m_BeforePostProcessColor.Init("_CameraColorAttachmentA");
             // Create the three render passes and send the custom post-processing renderer classes to each
             Dictionary<string, CustomPostProcessRenderer> shared = new Dictionary<string, CustomPostProcessRenderer>();
             m_AfterOpaqueAndSky = new CustomPostProcessRenderPass(CustomPostProcessInjectionPoint.AfterOpaqueAndSky, InstantiateRenderers(settings.renderersAfterOpaqueAndSky, shared));
@@ -208,7 +221,8 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
                     break;
                 case CustomPostProcessInjectionPoint.AfterPostProcess:
                     // NOTE: This was initially "AfterRenderingPostProcessing" but it made the builtin post-processing to blit directly to the camera target.
-                    renderPassEvent = RenderPassEvent.AfterRendering;
+                    // NOTE: For URP 12, we are back to using "AfterRenderingPostProcessing"
+                    renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
                     m_PassName = "Custom PostProcess after PostProcess";
                     break;
             }
@@ -256,6 +270,16 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         public void Setup(RenderTargetIdentifier source, RenderTargetIdentifier destination){
             this.m_Source = source;
             this.m_Destination = destination;
+        }
+
+        public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+        {
+            base.OnCameraSetup(cmd, ref renderingData);
+        }
+
+        public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
+        {
+            base.Configure(cmd, cameraTextureDescriptor);
         }
 
         /// <summary>
