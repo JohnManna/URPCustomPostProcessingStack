@@ -29,10 +29,10 @@ Other custom effects in samples but not used in screenshots:
 
 ## Compatibility
 
-* Unity 2020.2
-* URP 10.2.2
+This branch is under development and it targets:
 
-**Note:** There is a branch with support for URP 8.2.0 (Unity 2020.1) which you can find [here](https://github.com/yahiaetman/URPCustomPostProcessingStack/tree/URP-8.2.0).
+* Unity 2021.2 & 2021.3
+* URP 12.1
 
 ## Features
 
