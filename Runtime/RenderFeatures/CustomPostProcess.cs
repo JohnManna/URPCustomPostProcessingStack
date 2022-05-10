@@ -47,42 +47,28 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         private CustomPostProcessRenderPass m_AfterOpaqueAndSky, m_BeforePostProcess, m_AfterPostProcess;
 
         /// <summary>
-        /// A handle to the "_AfterPostProcessTexture" used as the target for the builtin post processing pass in the last camera in the camera stack 
-        /// </summary>
-        private RenderTargetHandle m_AfterPostProcessColor, m_BeforePostProcessColor;
-
-        /// <summary>
         /// Injects the custom post-processing render passes.
         /// </summary>
         /// <param name="renderer">The renderer</param>
         /// <param name="renderingData">Rendering state. Use this to setup render passes.</param>
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            UniversalRenderer u_renderer = renderer as UniversalRenderer;
-            if(u_renderer == null) {
-                Debug.LogWarning("The CustomPostProcess renderer feature supports the UniversalRenderer only");
-                return;
-            }
+            // UniversalRenderer u_renderer = renderer as UniversalRenderer;
+            // if(u_renderer == null) {
+            //     Debug.LogWarning("The CustomPostProcess renderer feature supports the UniversalRenderer only");
+            //     return;
+            // }
             
             // Only inject passes if post processing is enabled
             if(renderingData.cameraData.postProcessEnabled) {
                 // For each pass, only inject if there is at least one custom post-processing renderer class in it.
                 if(m_AfterOpaqueAndSky.HasPostProcessRenderers && m_AfterOpaqueAndSky.PrepareRenderers(ref renderingData)){
-                    //m_AfterOpaqueAndSky.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
-                    //For URP 12
-                    m_AfterOpaqueAndSky.Setup(m_BeforePostProcessColor.Identifier(), m_BeforePostProcessColor.Identifier());
                     renderer.EnqueuePass(m_AfterOpaqueAndSky);
                 }
                 if(m_BeforePostProcess.HasPostProcessRenderers && m_BeforePostProcess.PrepareRenderers(ref renderingData)){
-                    //m_BeforePostProcess.Setup(renderer.cameraColorTarget, renderer.cameraColorTarget);
-                    //For URP 12
-                    m_BeforePostProcess.Setup(m_BeforePostProcessColor.Identifier(), m_BeforePostProcessColor.Identifier());
                     renderer.EnqueuePass(m_BeforePostProcess);
                 }
                 if(m_AfterPostProcess.HasPostProcessRenderers && m_AfterPostProcess.PrepareRenderers(ref renderingData)){
-                    // If this camera resolve to the final target, then both the source & destination will be "_AfterPostProcessTexture" (Note: a final blit/post pass is added by the renderer).
-                    var source = renderingData.cameraData.resolveFinalTarget ? m_AfterPostProcessColor.Identifier() : renderer.cameraColorTarget;
-                    m_AfterPostProcess.Setup(source, source);
                     renderer.EnqueuePass(m_AfterPostProcess);
                 }
             }
@@ -93,11 +79,6 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         /// </summary>
         public override void Create()
         {
-            // This is copied from the forward renderer
-            //m_AfterPostProcessColor.Init("_AfterPostProcessTexture");
-            //For URP 12
-            m_AfterPostProcessColor.Init("_CameraColorAttachmentB");
-            m_BeforePostProcessColor.Init("_CameraColorAttachmentA");
             // Create the three render passes and send the custom post-processing renderer classes to each
             Dictionary<string, CustomPostProcessRenderer> shared = new Dictionary<string, CustomPostProcessRenderer>();
             m_AfterOpaqueAndSky = new CustomPostProcessRenderPass(CustomPostProcessInjectionPoint.AfterOpaqueAndSky, InstantiateRenderers(settings.renderersAfterOpaqueAndSky, shared));
@@ -172,16 +153,6 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         /// The texture descriptor for the intermediate render targets.
         /// </summary>
         private RenderTextureDescriptor m_IntermediateDesc;
-
-        /// <summary>
-        /// The source of the color data for the render pass
-        /// </summary>
-        private RenderTargetIdentifier m_Source;
-
-        /// <summary>
-        /// The destination of the color data for the render pass
-        /// </summary>
-        private RenderTargetIdentifier m_Destination;
 
         /// <summary>
         /// A list of profiling samplers, one for each post process renderer
@@ -262,16 +233,6 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
             }
         }
 
-        /// <summary>
-        /// Setup the source and destination render targets
-        /// </summary>
-        /// <param name="source">Source render target</param>
-        /// <param name="destination">Destination render target</param>
-        public void Setup(RenderTargetIdentifier source, RenderTargetIdentifier destination){
-            this.m_Source = source;
-            this.m_Destination = destination;
-        }
-
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             base.OnCameraSetup(cmd, ref renderingData);
@@ -312,7 +273,7 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
 
             // return if no renderers are active
             return m_ActivePostProcessRenderers.Count != 0;
-        } 
+        }
 
         /// <summary>
         /// Execute the custom post processing renderers
@@ -321,6 +282,8 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
         /// <param name="renderingData">Current rendering data</param>
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
+            RenderTargetIdentifier target = renderingData.cameraData.renderer.cameraColorTarget;
+
             // Copy camera target description for intermediate RTs. Disable multisampling and depth buffer for the intermediate targets.
             m_IntermediateDesc = renderingData.cameraData.cameraTargetDescriptor;
             m_IntermediateDesc.msaaSamples = 1;
@@ -348,18 +311,12 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
                 RenderTargetIdentifier source, destination;
                 if(index == 0){
                     // If this is the first renderers then the source will be the external source (not intermediate).
-                    source = m_Source;
+                    source = target;
                     if(m_ActivePostProcessRenderers.Count == 1){
-                        // There is only one renderer, check if the source is the same as the destination
-                        if(m_Source == m_Destination){
                             // Since we can't bind the same RT as a texture and a render target at the same time, we will blit to an intermediate RT.
-                            destination = GetIntermediate(cmd, 0);
-                            // Then we will blit back to the destination.
-                            requireBlitBack = true;
-                        } else {
-                            // Otherwise, we can directly blit from source to destination.
-                            destination = m_Destination;
-                        }
+                        destination = GetIntermediate(cmd, 0);
+                        // Then we will blit back to the destination.
+                        requireBlitBack = true;
                     } else {
                         // If there is more than one renderer, we will need to the intermediate RT anyway.
                         destination = GetIntermediate(cmd, intermediateIndex);
@@ -369,7 +326,7 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
                     source = GetIntermediate(cmd, intermediateIndex);
                     if(index == m_ActivePostProcessRenderers.Count - 1){
                         // If this is the last renderer, blit to the destination directly.
-                        destination = m_Destination;
+                        destination = target;
                     } else {
                         // Otherwise, flip the intermediate RT index and set as destination.
                         // This will act as a ping pong process between the 2 RT where color data keeps moving back and forth while being processed on each pass.
@@ -391,7 +348,7 @@ namespace UnityEngine.Rendering.Universal.PostProcessing {
 
             // If blit back is needed, blit from the intermediate RT to the destination (see above for explanation)
             if(requireBlitBack)
-                Blit(cmd, m_Intermediate[0].Identifier(), m_Destination);
+                Blit(cmd, m_Intermediate[0].Identifier(), target);
             
             // Release allocated Intermediate RTs.
             CleanupIntermediate(cmd);
